@@ -1,41 +1,88 @@
 # import libraries and include in requirements.txt
 
-
+import os
+from dotenv import load_dotenv
+import mysql.connector
+import boto3
 
 # load environment variables from .env file
 
-
+load_dotenv()
 
 # Mysql Database Connection Settings
 # eg. MYSQL_HOST = os.getenv('MYSQL_HOST')
 
+MYSQL_HOST = os.getenv('MYSQL_HOST')
+MYSQL_USER = os.getenv('MYSQL_USER')
+MYSQL_PASSWORD = os.getenv('MYSQL_PASSWORD')
+MYSQL_DATABASE = os.getenv('MYSQL_DATABASE')
+
+conn = mysql.connector.connect(
+    host=MYSQL_HOST,
+    user=MYSQL_USER,
+    password=MYSQL_PASSWORD,
+    database=MYSQL_DATABASE
+)
 
 
 # AWS S3 Connection Settings
 # eg. AWS_ACCESS_KEY_ID = os.getenv('AWS_ACCESS_KEY_ID')
 
 
+AWS_ACCESS_KEY_ID = os.getenv('AWS_ACCESS_KEY_ID')
+AWS_SECRET_ACCESS_KEY = os.getenv('AWS_SECRET_ACCESS_KEY')
+AWS_REGION = os.getenv('AWS_REGION')
+S3_BUCKET_NAME = os.getenv('S3_BUCKET_NAME')
 
 # BONUS: Validate the required environment variables
 # - we want to ensure that all necessary environment variables are set before proceeding
 
 
+def validate_env_vars():
+    required_vars = [
+        'MYSQL_HOST',
+        'MYSQL_USER',
+        'MYSQL_PASSWORD',
+        'MYSQL_DATABASE',
+        'AWS_ACCESS_KEY_ID',
+        'AWS_SECRET_ACCESS_KEY',
+        'AWS_REGION',
+        'S3_BUCKET_NAME'
+    ]
+
+    missing = [var for var in required_vars if not os.getenv(var)]
+    if missing:
+        raise EnvironmentError(f"Missing required environment variables: {', '.join(missing)}")
+
+validate_env_vars()
 
 # define the export function - eg. def export_data():
 # - Export Mysql table data to specified format (Parquet or JSON) files grouped by CREATED_AT date,
 #   and upload them to AWS S3 bucket using a structured path.
 
 
-
 # define the export_as_json function
 # - Export data as JSON file
 
-
+def export_as_json(df, filename):
+    """
+    Export the given DataFrame as a JSON file.
+    Each record is one line (newline-delimited JSON).
+    """
+    file_path = f"{filename}.json"
+    df.to_json(file_path, orient='records', lines=True)
+    return file_path
 
 # define the export_as_parquet function
 # - Export data as Parquet file
 
-
+def export_as_parquet(df, filename):
+    """
+    Export the given DataFrame as a Parquet file.
+    """
+    file_path = f"{filename}.parquet"
+    df.to_parquet(file_path, engine='pyarrow', index=False)
+    return file_path
 
 # define upload_to_s3 function
 # - Uploads a local file to AWS S3 at the given path
