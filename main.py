@@ -14,12 +14,14 @@ load_dotenv()
 
 MYSQL_HOST = os.getenv('MYSQL_HOST')
 MYSQL_USER = os.getenv('MYSQL_USER')
+MYSQL_PORT = int(os.getenv('MYSQL_PORT'))
 MYSQL_PASSWORD = os.getenv('MYSQL_PASSWORD')
 MYSQL_DATABASE = os.getenv('MYSQL_DATABASE')
 
 conn = mysql.connector.connect(
     host=MYSQL_HOST,
     user=MYSQL_USER,
+    port=MYSQL_PORT,
     password=MYSQL_PASSWORD,
     database=MYSQL_DATABASE
 )
@@ -42,6 +44,7 @@ def validate_env_vars():
     required_vars = [
         'MYSQL_HOST',
         'MYSQL_USER',
+        'MYSQL_PORT',
         'MYSQL_PASSWORD',
         'MYSQL_DATABASE',
         'AWS_ACCESS_KEY_ID',
