@@ -3,6 +3,7 @@
 import os
 from dotenv import load_dotenv
 import mysql.connector
+import pandas as pd
 import boto3
 
 # load environment variables from .env file
@@ -17,6 +18,7 @@ MYSQL_USER = os.getenv('MYSQL_USER')
 MYSQL_PORT = int(os.getenv('MYSQL_PORT'))
 MYSQL_PASSWORD = os.getenv('MYSQL_PASSWORD')
 MYSQL_DATABASE = os.getenv('MYSQL_DATABASE')
+MYSQL_TABLE = os.getenv('MYSQL_TABLE')
 
 conn = mysql.connector.connect(
     host=MYSQL_HOST,
