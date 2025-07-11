@@ -2,10 +2,11 @@
 
 import os
 from dotenv import load_dotenv
-import mysql.connector
 import pandas as pd
 import boto3
 from datetime import datetime, timedelta, timezone
+from sqlalchemy import create_engine
+import json
 
 # load environment variables from .env file
 
@@ -21,12 +22,10 @@ MYSQL_PASSWORD = os.getenv('MYSQL_PASSWORD')
 MYSQL_DATABASE = os.getenv('MYSQL_DATABASE')
 MYSQL_TABLE = os.getenv('MYSQL_TABLE')
 
-conn = mysql.connector.connect(
-    host=MYSQL_HOST,
-    user=MYSQL_USER,
-    port=MYSQL_PORT,
-    password=MYSQL_PASSWORD,
-    database=MYSQL_DATABASE
+
+# Build SQLAlchemy connection string
+conn = create_engine(
+    f"mysql+pymysql://{MYSQL_USER}:{MYSQL_PASSWORD}@{MYSQL_HOST}:{MYSQL_PORT}/{MYSQL_DATABASE}"
 )
 
 
@@ -72,18 +71,21 @@ def export_data(export_format, min_age_hours):
     df = pd.read_sql(query, conn)
 
     # Convert to datetime and ensure UTC
-    df['CREATED_AT'] = pd.to_datetime(df['CREATED_AT'], utc=True)
+    df['created_at'] = pd.to_datetime(df['created_at'], utc=True)
+
+    if 'context' in df.columns:
+        df['context'] = df['context'].apply(double_json_load)
 
     # Filter rows older than min_age_hours
     cutoff_time = datetime.now(timezone.utc) - timedelta(hours=min_age_hours)
-    df = df[df['CREATED_AT'] <= cutoff_time]
+    df = df[df['created_at'] <= cutoff_time]
 
     if df.empty:
-        print(f"ℹ️ No data older than {min_age_hours} hours to export.")
+        print(f"No data older than {min_age_hours} hours to export.")
         return
 
     # Group by just the date part
-    df['created_date'] = df['CREATED_AT'].dt.date
+    df['created_date'] = df['created_at'].dt.date
 
     for date, group in df.groupby('created_date'):
         date_str = date.strftime('%Y-%m-%d')
@@ -101,6 +103,25 @@ def export_data(export_format, min_age_hours):
         upload_to_s3(file_path, s3_key)
 
 
+
+def clean_nested_json_fields(df, column_names):
+    for col in column_names:
+        df[col] = df[col].apply(lambda x: json.loads(x) if isinstance(x, str) and x.strip().startswith('{') else x)
+    return df
+
+
+def double_json_load(value):
+    """Safely parse a double-encoded JSON string into a Python object."""
+    try:
+        if isinstance(value, str):
+            first = json.loads(value)
+            if isinstance(first, str):
+                return json.loads(first)
+            return first
+    except Exception:
+        pass
+    return value
+
 # define the export_as_json function
 # - Export data as JSON file
 
@@ -110,7 +131,9 @@ def export_as_json(df, filename):
     Each record is one line (newline-delimited JSON).
     """
     file_path = f"{filename}.json"
+    df = clean_nested_json_fields(df, ['context'])
     df.to_json(file_path, orient='records', lines=True)
+
     return file_path
 
 # define the export_as_parquet function
@@ -123,6 +146,7 @@ def export_as_parquet(df, filename):
     file_path = f"{filename}.parquet"
     df.to_parquet(file_path, engine='pyarrow', index=False)
     return file_path
+
 
 # define upload_to_s3 function
 # - Uploads a local file to AWS S3 at the given path
@@ -144,15 +168,15 @@ def upload_to_s3(file_path, s3_key):
 
     try:
         s3.upload_file(file_path, S3_BUCKET_NAME, s3_key)
-        print(f"✅ Uploaded {file_path} to s3://{S3_BUCKET_NAME}/{s3_key}")
+        print(f"Uploaded {file_path} to s3://{S3_BUCKET_NAME}/{s3_key}")
     except Exception as e:
-        print(f"❌ Failed to upload {file_path} to S3: {e}")
+        print(f"Failed to upload {file_path} to S3: {e}")
 
 
 if __name__ == "__main__":
     #format and min_age_hours should be changed here.
     export_format = "json"
-    min_age_hours = 24
+    min_age_hours = 20
     export_data(export_format, min_age_hours)
 
 # Entry point of the application
