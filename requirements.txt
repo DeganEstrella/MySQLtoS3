@@ -1,5 +1,6 @@
 pandas
-mysql-connector-python
 python-dotenv
 boto3
 pyarrow
+sqlalchemy
+pymysql
