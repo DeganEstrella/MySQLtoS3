@@ -1,20 +1,16 @@
 # import libraries and include in requirements.txt
-
 import os
 from dotenv import load_dotenv
 import pandas as pd
 import boto3
 from datetime import datetime, timedelta, timezone
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 import json
 
 # load environment variables from .env file
-
 load_dotenv()
 
 # Mysql Database Connection Settings
-# eg. MYSQL_HOST = os.getenv('MYSQL_HOST')
-
 MYSQL_HOST = os.getenv('MYSQL_HOST')
 MYSQL_USER = os.getenv('MYSQL_USER')
 MYSQL_PORT = int(os.getenv('MYSQL_PORT'))
@@ -22,26 +18,20 @@ MYSQL_PASSWORD = os.getenv('MYSQL_PASSWORD')
 MYSQL_DATABASE = os.getenv('MYSQL_DATABASE')
 MYSQL_TABLE = os.getenv('MYSQL_TABLE')
 
-
 # Build SQLAlchemy connection string
 conn = create_engine(
     f"mysql+pymysql://{MYSQL_USER}:{MYSQL_PASSWORD}@{MYSQL_HOST}:{MYSQL_PORT}/{MYSQL_DATABASE}"
 )
 
-
 # AWS S3 Connection Settings
 # eg. AWS_ACCESS_KEY_ID = os.getenv('AWS_ACCESS_KEY_ID')
-
-
 AWS_ACCESS_KEY_ID = os.getenv('AWS_ACCESS_KEY_ID')
 AWS_SECRET_ACCESS_KEY = os.getenv('AWS_SECRET_ACCESS_KEY')
 AWS_REGION = os.getenv('AWS_REGION')
 S3_BUCKET_NAME = os.getenv('S3_BUCKET_NAME')
 
-# BONUS: Validate the required environment variables
-# - we want to ensure that all necessary environment variables are set before proceeding
-
-
+# Validate the required environment variables
+# - Ensure that all necessary environment variables are set before proceeding
 def validate_env_vars():
     required_vars = [
         'MYSQL_HOST',
@@ -62,10 +52,9 @@ def validate_env_vars():
 
 validate_env_vars()
 
-# define the export function - eg. def export_data():
+# define the export function
 # - Export Mysql table data to specified format (Parquet or JSON) files grouped by CREATED_AT date,
 #   and upload them to AWS S3 bucket using a structured path.
-
 def export_data(export_format, min_age_hours):
     query = f"SELECT * FROM {MYSQL_TABLE}"
     df = pd.read_sql(query, conn)
@@ -100,15 +89,15 @@ def export_data(export_format, min_age_hours):
         else:
             raise ValueError("Unsupported format. Use 'json' or 'parquet'.")
 
-        upload_to_s3(file_path, s3_key)
+        success = upload_to_s3(file_path, s3_key)
 
-
+        if success:
+            delete_uploaded_rows(group)
 
 def clean_nested_json_fields(df, column_names):
     for col in column_names:
         df[col] = df[col].apply(lambda x: json.loads(x) if isinstance(x, str) and x.strip().startswith('{') else x)
     return df
-
 
 def double_json_load(value):
     """Safely parse a double-encoded JSON string into a Python object."""
@@ -124,7 +113,6 @@ def double_json_load(value):
 
 # define the export_as_json function
 # - Export data as JSON file
-
 def export_as_json(df, filename):
     """
     Export the given DataFrame as a JSON file.
@@ -138,7 +126,6 @@ def export_as_json(df, filename):
 
 # define the export_as_parquet function
 # - Export data as Parquet file
-
 def export_as_parquet(df, filename):
     """
     Export the given DataFrame as a Parquet file.
@@ -147,10 +134,8 @@ def export_as_parquet(df, filename):
     df.to_parquet(file_path, engine='pyarrow', index=False)
     return file_path
 
-
 # define upload_to_s3 function
 # - Uploads a local file to AWS S3 at the given path
-
 def upload_to_s3(file_path, s3_key):
     """
     Upload a local file to AWS S3.
@@ -159,24 +144,42 @@ def upload_to_s3(file_path, s3_key):
     - file_path: str, path to the local file to upload
     - s3_key: str, the destination path/key in the S3 bucket
     """
-    s3 = boto3.client(
-        's3',
-        aws_access_key_id=AWS_ACCESS_KEY_ID,
-        aws_secret_access_key=AWS_SECRET_ACCESS_KEY,
-        region_name=AWS_REGION
-    )
-
     try:
+        s3 = boto3.client(
+            's3',
+            aws_access_key_id=AWS_ACCESS_KEY_ID,
+            aws_secret_access_key=AWS_SECRET_ACCESS_KEY,
+            region_name=AWS_REGION
+        )
         s3.upload_file(file_path, S3_BUCKET_NAME, s3_key)
         print(f"Uploaded {file_path} to s3://{S3_BUCKET_NAME}/{s3_key}")
+        return True
     except Exception as e:
         print(f"Failed to upload {file_path} to S3: {e}")
+        return False
 
+
+def delete_uploaded_rows(df_group):
+    """
+    Deletes rows from MySQL that were already exported.
+    Assumes 'id' is the primary key of the table.
+    """
+    if 'id' not in df_group.columns:
+        print("Cannot delete rows: 'id' column not found.")
+        return
+
+    ids = df_group['id'].tolist()
+    id_placeholders = ','.join([':id' + str(i) for i in range(len(ids))])
+    delete_query = f"DELETE FROM {MYSQL_TABLE} WHERE id IN ({id_placeholders})"
+
+    params = {f'id{i}': id_val for i, id_val in enumerate(ids)}
+    with conn.begin() as connection:
+        connection.execute(text(delete_query), params)
+
+    print(f"Deleted {len(ids)} rows from MySQL.")
 
 if __name__ == "__main__":
     #format and min_age_hours should be changed here.
     export_format = "json"
     min_age_hours = 20
     export_data(export_format, min_age_hours)
-
-# Entry point of the application
