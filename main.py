@@ -17,6 +17,11 @@ MYSQL_PORT = int(os.getenv('MYSQL_PORT'))
 MYSQL_PASSWORD = os.getenv('MYSQL_PASSWORD')
 MYSQL_DATABASE = os.getenv('MYSQL_DATABASE')
 MYSQL_TABLE = os.getenv('MYSQL_TABLE')
+CREATED_AT_DATE = os.getenv('CREATED_AT_DATE')
+
+#Export Settings
+EXPORT_FORMAT = os.getenv('EXPORT_FORMAT')
+MIN_AGE_HOURS = int(os.getenv('MIN_AGE_HOURS'))
 
 # Build SQLAlchemy connection string
 conn = create_engine(
@@ -53,37 +58,39 @@ def validate_env_vars():
 validate_env_vars()
 
 # define the export function
-# - Export Mysql table data to specified format (Parquet or JSON) files grouped by CREATED_AT date,
+# - Export Mysql table data to specified format (Parquet or JSON) files grouped by CREATED_AT_DATE date,
 #   and upload them to AWS S3 bucket using a structured path.
-def export_data(export_format, min_age_hours):
+def export_data():
     query = f"SELECT * FROM {MYSQL_TABLE}"
     df = pd.read_sql(query, conn)
 
     # Convert to datetime and ensure UTC
-    df['created_at'] = pd.to_datetime(df['created_at'], utc=True)
+    df[CREATED_AT_DATE] = pd.to_datetime(df[CREATED_AT_DATE], utc=True)
 
     if 'context' in df.columns:
         df['context'] = df['context'].apply(double_json_load)
 
-    # Filter rows older than min_age_hours
-    cutoff_time = datetime.now(timezone.utc) - timedelta(hours=min_age_hours)
-    df = df[df['created_at'] <= cutoff_time]
+    # Filter rows older than MIN_AGE_HOURS
+    current_time = datetime.now(timezone.utc)
+    cutoff_time = current_time - timedelta(hours=MIN_AGE_HOURS)
+    df = df[df[CREATED_AT_DATE] <= cutoff_time]
 
     if df.empty:
-        print(f"No data older than {min_age_hours} hours to export.")
+        print(f"No data older than {MIN_AGE_HOURS} hours to export.")
         return
 
     # Group by just the date part
-    df['created_date'] = df['created_at'].dt.date
+    df['created_date'] = df[CREATED_AT_DATE].dt.date
 
     for date, group in df.groupby('created_date'):
         date_str = date.strftime('%Y-%m-%d')
-        filename = f"{MYSQL_TABLE}_{date_str}"
+        timestamp_str = current_time.strftime('%H-%M-%S')
+        filename = f"{MYSQL_TABLE}_{date_str}_{timestamp_str}"
 
-        if export_format == "json":
+        if EXPORT_FORMAT == "json":
             file_path = export_as_json(group, filename)
             s3_key = f"{MYSQL_TABLE}/json/{date_str}/{filename}.json"
-        elif export_format == "parquet":
+        elif EXPORT_FORMAT == "parquet":
             file_path = export_as_parquet(group, filename)
             s3_key = f"{MYSQL_TABLE}/parquet/{date_str}/{filename}.parquet"
         else:
@@ -179,7 +186,4 @@ def delete_uploaded_rows(df_group):
     print(f"Deleted {len(ids)} rows from MySQL.")
 
 if __name__ == "__main__":
-    #format and min_age_hours should be changed here.
-    export_format = "json"
-    min_age_hours = 20
-    export_data(export_format, min_age_hours)
+    export_data()
